@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>实时天气预报</title>
+<style>
+  :root {
+    --bg: #0a0a2e;
+    --card: rgba(255, 255, 255, 0.08);
+    --text: #e0e0e0;
+    --accent: #4fc3f7;
+    --warm: #ffb74d;
+    --cold: #64b5f6;
+    --rain: #4fc3f7;
+    --snow: #e0e0e0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: linear-gradient(135deg, #0a0a2e 0%, #1a1a4e 30%, #0d2137 60%, #1a1a4e 100%);
+    background-size: 400% 400%;
+    animation: gradientShift 20s ease infinite;
+    min-height: 100vh;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  @keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* Stars background */
+  .stars {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .star {
+    position: absolute;
+    background: white;
+    border-radius: 50%;
+    animation: twinkle var(--dur) ease-in-out infinite;
+    animation-delay: var(--delay);
+  }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 0.8; }
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 900px;
+    padding: 20px;
+  }
+
+  /* Header / Search */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .logo {
+    font-size: 28px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #4fc3f7, #81d4fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    white-space: nowrap;
+  }
+  .search-wrapper {
+    flex: 1;
+    position: relative;
+    min-width: 250px;
+  }
+  .search-box {
+    display: flex;
+    background: var(--card);
+    border-radius: 30px;
+    overflow: hidden;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    transition: border-color 0.3s;
+  }
+  .search-box:focus-within {
+    border-color: var(--accent);
+  }
+  .search-box input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: white;
+    padding: 14px 20px;
+    font-size: 16px;
+    outline: none;
+    min-width: 0;
+  }
+  .search-box input::placeholder { color: rgba(255,255,255,0.4); }
+  .search-box button {
+    background: var(--accent);
+    border: none;
+    color: #0a0a2e;
+    padding: 14px 24px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: background 0.3s;
+  }
+  .search-box button:hover { background: #81d4fa; }
+
+  .suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 6px;
+    background: rgba(20, 20, 60, 0.95);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    display: none;
+    z-index: 10;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .suggestions.active { display: block; }
+  .suggestions .item {
+    padding: 12px 20px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .suggestions .item:hover { background: rgba(79, 195, 247, 0.15); }
+  .suggestions .item .name { font-weight: 500; }
+  .suggestions .item .detail { font-size: 13px; color: rgba(255,255,255,0.5); }
+
+  .locate-btn {
+    background: var(--card);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 20px;
+    backdrop-filter: blur(20px);
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .locate-btn:hover {
+    background: var(--accent);
+    color: #0a0a2e;
+  }
+  .locate-btn.locating {
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
+
+  /* Current Weather Card */
+  .current-card {
+    background: var(--card);
+    backdrop-filter: blur(20px);
+    border-radius: 24px;
+    padding: 40px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+  }
+  .current-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at 70% 20%, rgba(79, 195, 247, 0.1), transparent 60%);
+    pointer-events: none;
+  }
+  .city-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 20px;
+    position: relative;
+    z-index: 1;
+  }
+  .city-name {
+    font-size: 32px;
+    font-weight: 700;
+  }
+  .city-detail {
+    font-size: 14px;
+    color: rgba(255,255,255,0.5);
+    margin-top: 4px;
+  }
+  .date-time {
+    font-size: 14px;
+    color: rgba(255,255,255,0.6);
+    text-align: right;
+  }
+  .weather-main {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    margin-top: 30px;
+    position: relative;
+    z-index: 1;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .weather-icon {
+    font-size: 90px;
+    line-height: 1;
+  }
+  .temperature {
+    font-size: 80px;
+    font-weight: 200;
+    line-height: 1;
+  }
+  .temp-unit {
+    font-size: 28px;
+    vertical-align: super;
+    margin-left: 2px;
+    opacity: 0.7;
+  }
+  .weather-desc {
+    font-size: 18px;
+    color: rgba(255,255,255,0.7);
+  }
+  .feels-like {
+    font-size: 14px;
+    color: rgba(255,255,255,0.5);
+    margin-top: 4px;
+  }
+
+  /* Weather details grid */
+  .details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+    margin-top: 30px;
+    position: relative;
+    z-index: 1;
+  }
+  .detail-item {
+    background: rgba(255,255,255,0.05);
+    border-radius: 16px;
+    padding: 16px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .detail-icon { font-size: 24px; margin-bottom: 6px; }
+  .detail-value { font-size: 20px; font-weight: 600; }
+  .detail-label { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+
+  /* Forecast */
+  .section-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 24px 0 16px;
+    padding-left: 4px;
+  }
+  .forecast-scroll {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    scroll-behavior: smooth;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .forecast-scroll::-webkit-scrollbar { display: none; }
+
+  .forecast-day {
+    background: var(--card);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    padding: 20px 24px;
+    min-width: 110px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: transform 0.3s, background 0.3s;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .forecast-day:hover {
+    transform: translateY(-4px);
+    background: rgba(255,255,255,0.12);
+  }
+  .forecast-day-name { font-size: 14px; font-weight: 600; }
+  .forecast-day-date { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+  .forecast-icon { font-size: 36px; margin: 10px 0; }
+  .forecast-temp-high { font-size: 18px; font-weight: 600; }
+  .forecast-temp-low { font-size: 14px; color: rgba(255,255,255,0.5); }
+
+  /* Hourly */
+  .hourly-scroll {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hourly-scroll::-webkit-scrollbar { display: none; }
+  .hourly-item {
+    background: var(--card);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    padding: 14px 16px;
+    min-width: 80px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+  }
+  .hourly-time { font-size: 12px; color: rgba(255,255,255,0.5); }
+  .hourly-icon { font-size: 24px; margin: 6px 0; }
+  .hourly-temp { font-size: 16px; font-weight: 600; }
+
+  /* Loading & Error */
+  .loading-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(10, 10, 46, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    display: none;
+  }
+  .loading-overlay.active { display: flex; }
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .error-toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 82, 82, 0.9);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 30px;
+    z-index: 200;
+    font-size: 14px;
+    display: none;
+    backdrop-filter: blur(10px);
+  }
+  .error-toast.show {
+    display: block;
+    animation: fadeInOut 3s ease forwards;
+  }
+  @keyframes fadeInOut {
+    0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+    10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 24px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.3);
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .current-card { padding: 24px; }
+    .temperature { font-size: 56px; }
+    .weather-icon { font-size: 64px; }
+    .city-name { font-size: 24px; }
+    .header { gap: 8px; }
+    .logo { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Stars -->
+<div class="stars" id="stars"></div>
+
+<!-- Error Toast -->
+<div class="error-toast" id="errorToast"></div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+</div>
+
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">🌤 实时天气</div>
+    <div class="search-wrapper">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索城市名称..." autocomplete="off">
+        <button id="searchBtn">🔍 搜索</button>
+      </div>
+      <div class="suggestions" id="suggestions"></div>
+    </div>
+    <button class="locate-btn" id="locateBtn" title="定位当前城市">📍</button>
+  </div>
+
+  <!-- Current Weather -->
+  <div class="current-card" id="currentCard">
+    <div class="city-info">
+      <div>
+        <div class="city-name" id="cityName">合肥市</div>
+        <div class="city-detail" id="cityDetail">安徽省 · 中国</div>
+      </div>
+      <div class="date-time" id="dateTime"></div>
+    </div>
+    <div class="weather-main">
+      <div class="weather-icon" id="weatherIcon">☀️</div>
+      <div>
+        <div class="temperature">
+          <span id="temperature">--</span><span class="temp-unit">°C</span>
+        </div>
+        <div class="weather-desc" id="weatherDesc">加载中...</div>
+        <div class="feels-like" id="feelsLike"></div>
+      </div>
+    </div>
+    <div class="details-grid" id="detailsGrid"></div>
+  </div>
+
+  <!-- Hourly Forecast -->
+  <div class="section-title">⏰ 逐时预报</div>
+  <div class="hourly-scroll" id="hourlyScroll"></div>
+
+  <!-- 7-Day Forecast -->
+  <div class="section-title">📅 七日预报</div>
+  <div class="forecast-scroll" id="forecastScroll"></div>
+
+  <div class="footer">
+    数据来源 <a href="https://open-meteo.com/" target="_blank">Open-Meteo</a> ·
+    免费实时天气 API
+  </div>
+</div>
+
+<script>
+// ==================== Stars Background ====================
+(function createStars() {
+  const container = document.getElementById('stars');
+  for (let i = 0; i < 80; i++) {
+    const star = document.createElement('div');
+    star.className = 'star';
+    const size = Math.random() * 2 + 1;
+    star.style.cssText = `
+      width: ${size}px; height: ${size}px;
+      top: ${Math.random() * 100}%;
+      left: ${Math.random() * 100}%;
+      --dur: ${Math.random() * 3 + 2}s;
+      --delay: ${Math.random() * 5}s;
+    `;
+    container.appendChild(star);
+  }
+})();
+
+// ==================== State ====================
+let currentCity = { name: '合肥市', admin1: '安徽省', country: '中国', lat: 31.8639, lon: 117.2808 };
+let debounceTimer = null;
+
+// ==================== DOM Refs ====================
+const $ = (id) => document.getElementById(id);
+const searchInput = $('searchInput');
+const suggestions = $('suggestions');
+const loading = $('loading');
+const errorToast = $('errorToast');
+
+// ==================== Helpers ====================
+function showLoading() { loading.classList.add('active'); }
+function hideLoading() { loading.classList.remove('active'); }
+function showError(msg) {
+  errorToast.textContent = msg;
+  errorToast.classList.remove('show');
+  void errorToast.offsetWidth;
+  errorToast.classList.add('show');
+}
+
+function formatDate(date) {
+  const days = ['周日','周一','周二','周三','周四','周五','周六'];
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const day = days[date.getDay()];
+  return `${y}年${m}月${d}日 ${day}`;
+}
+
+function formatTime(date) {
+  return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+}
+
+function getWeatherIcon(code, isDay) {
+  // WMO weather codes
+  const icons = {
+    0: isDay ? '☀️' : '🌙',
+    1: isDay ? '🌤️' : '🌙',
+    2: '⛅',
+    3: '☁️',
+    45: '🌫️', 48: '🌫️',
+    51: '🌦️', 53: '🌦️', 55: '🌧️',
+    56: '🌧️', 57: '🌧️',
+    61: '🌧️', 63: '🌧️', 65: '🌧️',
+    66: '🌧️', 67: '🌧️',
+    71: '🌨️', 73: '🌨️', 75: '❄️',
+    77: '🌨️',
+    80: '🌦️', 81: '🌧️', 82: '⛈️',
+    85: '🌨️', 86: '🌨️',
+    95: '⛈️', 96: '⛈️', 99: '⛈️',
+  };
+  return icons[code] || '🌈';
+}
+
+function getWeatherDesc(code) {
+  const desc = {
+    0: '晴朗', 1: '大部晴朗', 2: '多云', 3: '阴天',
+    45: '雾', 48: '雾凇',
+    51: '小毛毛雨', 53: '毛毛雨', 55: '大毛毛雨',
+    56: '冻毛毛雨', 57: '冻毛毛雨',
+    61: '小雨', 63: '中雨', 65: '大雨',
+    66: '冻雨', 67: '冻雨',
+    71: '小雪', 73: '中雪', 75: '大雪',
+    77: '雪粒',
+    80: '阵雨', 81: '中阵雨', 82: '大阵雨',
+    85: '小阵雪', 86: '大阵雪',
+    95: '雷暴', 96: '雷暴+冰雹', 99: '强雷暴+冰雹',
+  };
+  return desc[code] || '未知';
+}
+
+// ==================== API Calls ====================
+async function searchCities(query) {
+  if (!query || query.trim().length < 1) return [];
+  try {
+    const resp = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=8&language=zh&format=json`
+    );
+    const data = await resp.json();
+    return (data.results || []).map(r => ({
+      name: r.name || '',
+      admin1: r.admin1 || '',
+      country: r.country || '',
+      lat: r.latitude,
+      lon: r.longitude,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchWeather(lat, lon) {
+  const params = new URLSearchParams({
+    latitude: lat,
+    longitude: lon,
+    current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,pressure_msl,precipitation',
+    hourly: 'temperature_2m,weather_code,precipitation_probability',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+    timezone: 'auto',
+    forecast_days: '7',
+  });
+  const resp = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ==================== Render ====================
+function renderCurrent(data, city) {
+  const c = data.current;
+  const now = new Date();
+  const isDay = now.getHours() >= 6 && now.getHours() < 19;
+
+  $('cityName').textContent = city.name;
+  $('cityDetail').textContent = `${city.admin1 || ''} · ${city.country || ''}`;
+  $('dateTime').innerHTML = `${formatDate(now)}<br>${formatTime(now)} 更新`;
+
+  $('weatherIcon').textContent = getWeatherIcon(c.weather_code, isDay);
+  $('temperature').textContent = Math.round(c.temperature_2m);
+  $('weatherDesc').textContent = getWeatherDesc(c.weather_code);
+  $('feelsLike').textContent = `体感温度 ${Math.round(c.apparent_temperature)}°C`;
+
+  // Details grid
+  const details = [
+    { icon: '💧', value: `${c.relative_humidity_2m}%`, label: '相对湿度' },
+    { icon: '🌬️', value: `${c.wind_speed_10m} km/h`, label: '风速' },
+    { icon: '🧭', value: `${c.wind_direction_10m}°`, label: '风向' },
+    { icon: '📊', value: `${c.pressure_msl} hPa`, label: '气压' },
+    { icon: '💦', value: `${c.precipitation || 0} mm`, label: '降水量' },
+  ];
+  $('detailsGrid').innerHTML = details.map(d => `
+    <div class="detail-item">
+      <div class="detail-icon">${d.icon}</div>
+      <div class="detail-value">${d.value}</div>
+      <div class="detail-label">${d.label}</div>
+    </div>
+  `).join('');
+}
+
+function renderHourly(data) {
+  const hourly = data.hourly;
+  const now = new Date();
+  const currentHour = now.getHours();
+  const todayStr = now.toISOString().split('T')[0];
+
+  // Get next 24 hours of data starting from current hour
+  const items = [];
+  for (let i = 0; i < hourly.time.length && items.length < 24; i++) {
+    const t = new Date(hourly.time[i]);
+    if (t >= now || t.toISOString().split('T')[0] === todayStr) {
+      if (items.length === 0 && t < now) continue;
+    }
+    if (t < now) continue;
+    items.push({
+      time: formatTime(t),
+      temp: Math.round(hourly.temperature_2m[i]),
+      code: hourly.weather_code[i],
+      pop: hourly.precipitation_probability[i],
+      isDay: t.getHours() >= 6 && t.getHours() < 19,
+      date: t,
+    });
+  }
+
+  $('hourlyScroll').innerHTML = items.slice(0, 24).map(h => `
+    <div class="hourly-item">
+      <div class="hourly-time">${h.time}</div>
+      <div class="hourly-icon">${getWeatherIcon(h.code, h.isDay)}</div>
+      <div class="hourly-temp">${h.temp}°</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">${h.pop ? h.pop + '%' : ''}</div>
+    </div>
+  `).join('');
+}
+
+function renderDaily(data) {
+  const daily = data.daily;
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const items = [];
+  for (let i = 0; i < daily.time.length; i++) {
+    const date = new Date(daily.time[i] + 'T12:00:00');
+    const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
+    const dayName = daily.time[i] === todayStr ? '今天' : dayNames[date.getDay()];
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    items.push({
+      dayName,
+      dateStr: `${m}/${d}`,
+      icon: getWeatherIcon(daily.weather_code[i], true),
+      high: Math.round(daily.temperature_2m_max[i]),
+      low: Math.round(daily.temperature_2m_min[i]),
+      pop: daily.precipitation_probability_max[i],
+      fullDate: daily.time[i],
+    });
+  }
+
+  $('forecastScroll').innerHTML = items.map(f => `
+    <div class="forecast-day" onclick="selectForecastDay('${f.fullDate}')">
+      <div class="forecast-day-name">${f.dayName}</div>
+      <div class="forecast-day-date">${f.dateStr}</div>
+      <div class="forecast-icon">${f.icon}</div>
+      <div class="forecast-temp-high">${f.high}°</div>
+      <div class="forecast-temp-low">${f.low}°</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">${f.pop ? '💧'+f.pop+'%' : ''}</div>
+    </div>
+  `).join('');
+}
+
+// ==================== Main Load ====================
+async function loadWeather(city) {
+  showLoading();
+  try {
+    const data = await fetchWeather(city.lat, city.lon);
+    renderCurrent(data, city);
+    renderHourly(data);
+    renderDaily(data);
+    currentCity = city;
+
+    // Update URL hash
+    window.location.hash = `${city.lat.toFixed(4)},${city.lon.toFixed(4)}`;
+
+    // Clear search
+    searchInput.value = '';
+    suggestions.classList.remove('active');
+  } catch (e) {
+    showError('获取天气数据失败，请检查网络连接后重试');
+    console.error(e);
+  } finally {
+    hideLoading();
+  }
+}
+
+// ==================== Search ====================
+searchInput.addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  const query = searchInput.value.trim();
+  if (!query) {
+    suggestions.classList.remove('active');
+    return;
+  }
+  debounceTimer = setTimeout(async () => {
+    const results = await searchCities(query);
+    if (results.length === 0) {
+      suggestions.innerHTML = '<div class="item" style="color:rgba(255,255,255,0.4)">未找到匹配城市</div>';
+    } else {
+      suggestions.innerHTML = results.map(r => `
+        <div class="item" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${r.name}" data-admin1="${r.admin1 || ''}" data-country="${r.country || ''}">
+          <span class="name">${r.name}</span>
+          <span class="detail">${r.admin1 || ''} · ${r.country || ''}</span>
+        </div>
+      `).join('');
+    }
+    suggestions.classList.add('active');
+
+    // Click handlers
+    suggestions.querySelectorAll('.item[data-lat]').forEach(el => {
+      el.addEventListener('click', () => {
+        const city = {
+          name: el.dataset.name,
+          admin1: el.dataset.admin1,
+          country: el.dataset.country,
+          lat: parseFloat(el.dataset.lat),
+          lon: parseFloat(el.dataset.lon),
+        };
+        loadWeather(city);
+      });
+    });
+  }, 350);
+});
+
+$('searchBtn').addEventListener('click', async () => {
+  const query = searchInput.value.trim();
+  if (!query) return;
+  const results = await searchCities(query);
+  if (results.length > 0) {
+    loadWeather(results[0]);
+  } else {
+    showError('未找到该城市，请尝试其他关键词');
+  }
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    $('searchBtn').click();
+  }
+});
+
+// Close suggestions on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-wrapper')) {
+    suggestions.classList.remove('active');
+  }
+});
+
+// ==================== Geolocation ====================
+$('locateBtn').addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    showError('您的浏览器不支持定位功能');
+    return;
+  }
+  $('locateBtn').classList.add('locating');
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      $('locateBtn').classList.remove('locating');
+      const city = {
+        name: '当前位置',
+        admin1: '',
+        country: '',
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+      };
+      // Try to reverse geocode to get city name
+      try {
+        const resp = await fetch(
+          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&localityLanguage=zh`
+        );
+        const geo = await resp.json();
+        if (geo.city) city.name = geo.city;
+        if (geo.principalSubdivision) city.admin1 = geo.principalSubdivision;
+        if (geo.countryName) city.country = geo.countryName;
+      } catch {}
+      loadWeather(city);
+    },
+    (err) => {
+      $('locateBtn').classList.remove('locating');
+      showError('定位失败，请检查浏览器定位权限');
+      console.error(err);
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+
+// ==================== Forecast Day Click ====================
+window.selectForecastDay = function(dateStr) {
+  // Scroll hourly forecast to that day's first hour
+  const hourlyScroll = $('hourlyScroll');
+  const items = hourlyScroll.querySelectorAll('.hourly-item');
+  // Find the item with matching date
+  const data = currentCity;
+  // Just highlight the day - hourly data is already for today
+};
+
+// ==================== Init ====================
+function init() {
+  // Check URL hash for saved location
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    const parts = hash.split(',');
+    if (parts.length === 2) {
+      const lat = parseFloat(parts[0]);
+      const lon = parseFloat(parts[1]);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        currentCity = { name: '已保存位置', admin1: '', country: '', lat, lon };
+      }
+    }
+  }
+
+  // Load default city (Hefei)
+  loadWeather(currentCity);
+}
+
+init();
+</script>
+</body>
+</html>
